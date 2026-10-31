@@ -35,16 +35,25 @@ export default async (req) => {
   const messages = (Array.isArray(body.messages) ? body.messages : []).slice(-MAX_MESSAGES).map(clean).filter(Boolean);
   if (!messages.length) return json({ error: "Aucun message" }, 400);
 
-  // Modèle qui sait lire les images (par défaut Llama 4 Scout). Tu peux le changer avec GROQ_MODEL.
-  const model = Netlify.env.get("GROQ_MODEL") || "meta-llama/llama-4-scout-17b-16e-instruct";
+  // Texte seul : gpt-oss-120b (rapide). Avec photo : qwen3.6-27b (lit les images).
+  // Tu peux les changer dans Netlify avec GROQ_MODEL_TEXT et GROQ_MODEL_VISION.
+  const hasImage = messages.some((m) => Array.isArray(m.content) && m.content.some((p) => p.type === "image_url"));
+  const model = hasImage
+    ? Netlify.env.get("GROQ_MODEL_VISION") || "qwen/qwen3.6-27b"
+    : Netlify.env.get("GROQ_MODEL_TEXT") || "openai/gpt-oss-120b";
+  const extra = hasImage ? { reasoning_format: "hidden" } : { reasoning_effort: "low" };
 
-  const up = await fetch("https://api.groq.com/openai/v1/chat/completions", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model, messages, stream: true, max_tokens: 2000 }),
-  });
+  const call = (more) =>
+    fetch("https://api.groq.com/openai/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
+      body: JSON.stringify({ model, messages, stream: true, max_tokens: 3500, ...more }),
+    });
+
+  let up = await call(extra);
+  if (up.status === 400) up = await call({}); // si une option n'est pas acceptée, on réessaie sans
   if (!up.ok || !up.body) {
-    console.error("Groq error", up.status, (await up.text()).slice(0, 300));
+    console.error("Groq error", model, up.status, (await up.text()).slice(0, 400));
     return json({ error: "Erreur du modèle" }, up.status === 429 ? 429 : 502);
   }
   return new Response(up.body, {
