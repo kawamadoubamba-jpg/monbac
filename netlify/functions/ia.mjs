@@ -1,5 +1,5 @@
-// Route /api/ia : envoie les messages de l'appli à Grok (xAI) et renvoie la réponse en flux.
-// La clé reste secrète côté serveur (variable XAI_API_KEY).
+// Route /api/ia : envoie les messages de l'appli à Groq et renvoie la réponse en flux.
+// La clé reste secrète côté serveur (variable GROQ_API_KEY).
 const MAX_BYTES = 3_000_000; // ~ une photo réduite + texte
 const MAX_MESSAGES = 12;
 
@@ -24,8 +24,8 @@ function clean(m) {
 }
 
 export default async (req) => {
-  const key = Netlify.env.get("XAI_API_KEY");
-  if (!key) return json({ error: "XAI_API_KEY manquante" }, 500);
+  const key = Netlify.env.get("GROQ_API_KEY");
+  if (!key) return json({ error: "GROQ_API_KEY manquante" }, 500);
 
   const raw = await req.text();
   if (raw.length > MAX_BYTES) return json({ error: "Requête trop grosse" }, 413);
@@ -35,19 +35,16 @@ export default async (req) => {
   const messages = (Array.isArray(body.messages) ? body.messages : []).slice(-MAX_MESSAGES).map(clean).filter(Boolean);
   if (!messages.length) return json({ error: "Aucun message" }, 400);
 
-  const model =
-    body.tier === "complex"
-      ? Netlify.env.get("GROK_MODEL_COMPLEX") || Netlify.env.get("GROK_MODEL")
-      : Netlify.env.get("GROK_MODEL_QUICK") || Netlify.env.get("GROK_MODEL");
-  if (!model) return json({ error: "GROK_MODEL manquant" }, 500);
+  // Modèle qui sait lire les images (par défaut Llama 4 Scout). Tu peux le changer avec GROQ_MODEL.
+  const model = Netlify.env.get("GROQ_MODEL") || "meta-llama/llama-4-scout-17b-16e-instruct";
 
-  const up = await fetch("https://api.x.ai/v1/chat/completions", {
+  const up = await fetch("https://api.groq.com/openai/v1/chat/completions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${key}` },
     body: JSON.stringify({ model, messages, stream: true, max_tokens: 2000 }),
   });
   if (!up.ok || !up.body) {
-    console.error("xAI error", up.status, (await up.text()).slice(0, 300));
+    console.error("Groq error", up.status, (await up.text()).slice(0, 300));
     return json({ error: "Erreur du modèle" }, up.status === 429 ? 429 : 502);
   }
   return new Response(up.body, {
